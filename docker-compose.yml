@@ -1,0 +1,15 @@
+# Database lokal untuk RJ Analytics. Jalankan: docker compose up -d
+# Inspeksi via DBeaver -> host localhost, port 5432, user rj, db rj_analytics.
+services:
+  db:
+    image: postgres:16
+    container_name: rj_analytics_db
+    environment:
+      POSTGRES_USER: rj
+      POSTGRES_PASSWORD: ubah_password_ini
+      POSTGRES_DB: rj_analytics
+    ports: ["5434:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    restart: unless-stopped
+volumes:
+  pgdata: {}

@@ -1,0 +1,99 @@
+// Skema database RJ Analytics.
+// PRINSIP PRIVASI: hanya AGREGAT, TIDAK ada baris pasien
+// (tidak ada nama pasien, tanggal lahir, atau MRN di sini).
+//
+// GRAIN = (tanggal pelayanan × dokter). Menyimpan KOMPONEN MENTAH DCP/CWT
+// (numerator/denominator & total detik/jumlah), bukan persentase jadi,
+// agar filter range tanggal apa pun (termasuk bulan parsial) tetap akurat:
+//   DCP range = Σ dcpNumerator / Σ dcpDenominator × 100
+//   CWT range = Σ cwtTotalSeconds / Σ cwtCount / 60
+
+generator client { provider = "prisma-client-js" }
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // postgresql://rj:ubah_password_ini@localhost:5432/rj_analytics
+}
+
+// Satu baris per (tanggal × dokter). Diisi/di-upsert saat upload Report 1.
+model DoctorDailyMetric {
+  id              Int      @id @default(autoincrement())
+  serviceDate     DateTime @db.Date     // tanggal pelayanan
+  doctorName      String
+  patientCount    Int
+
+  // Komponen DCP mentah
+  dcpNumerator    Int                    // On Time/Early ∧ bukan waiting list
+  dcpDenominator  Int                    // bukan waiting list
+
+  // Komponen CWT mentah
+  cwtTotalSeconds Int                    // Σ waktu tunggu (On Time ∧ Appointment)
+  cwtCount        Int                    // jumlah baris valid
+
+  // Pemecah volume
+  appointment     Int      @default(0)
+  walkIn          Int      @default(0)
+  bpjs            Int      @default(0)
+  regular         Int      @default(0)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([serviceDate, doctorName]) // re-upload tanggal yang sama -> upsert
+  @@index([doctorName])
+  @@index([serviceDate])
+}
+
+// Analisa pasien (New vs Existing) per (tanggal × dokter) — dari Report 2.
+model PatientMixDaily {
+  id              Int      @id @default(autoincrement())
+  serviceDate     DateTime @db.Date
+  doctorName      String
+  newPatient      Int
+  existingPatient Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([serviceDate, doctorName])
+  @@index([serviceDate])
+}
+
+// Jejak file (audit & cegah dobel impor).
+model UploadLog {
+  id         Int      @id @default(autoincrement())
+  fileName   String
+  reportType String   // "report1" | "report2"
+  rangeFrom  DateTime @db.Date
+  rangeTo    DateTime @db.Date
+  rowCount   Int
+  uploadedAt DateTime @default(now())
+}
+
+// ===== Autentikasi & kontrol akses =====
+// Password TIDAK pernah disimpan plaintext — hanya hash (bcrypt) di passwordHash.
+
+enum Role {
+  ADMIN   // kelola akun & target KPI, plus semua hak USER
+  USER    // Manager RJ: upload, analisa, export
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
+  passwordHash String                          // bcrypt; jangan simpan plaintext
+  fullName     String
+  role         Role      @default(USER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+// Jejak login (audit keamanan).
+model AuthAuditLog {
+  id        Int      @id @default(autoincrement())
+  username  String
+  action    String   // "login_success" | "login_failed" | "logout"
+  ipAddress String?
+  at        DateTime @default(now())
+  @@index([username])
+}
