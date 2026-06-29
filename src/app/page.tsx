@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 
@@ -19,6 +19,8 @@ function UploadZone({ id, title, subtitle, hint, reportType, onDone }: UploadZon
   const [state, setState] = useState<UploadState>("idle");
   const [message, setMessage] = useState("");
   const [filename, setFilename] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [progressMsg, setProgressMsg] = useState("");
 
   async function processFile(file: File) {
     if (!file.name.endsWith(".xlsx")) {
@@ -29,6 +31,8 @@ function UploadZone({ id, title, subtitle, hint, reportType, onDone }: UploadZon
     setState("loading");
     setFilename(file.name);
     setMessage("");
+    setProgress(0);
+    setProgressMsg("Memulai proses…");
 
     const fd = new FormData();
     fd.append("file", file);
@@ -36,13 +40,55 @@ function UploadZone({ id, title, subtitle, hint, reportType, onDone }: UploadZon
 
     try {
       const res = await fetch("/api/analyze", { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Gagal memproses file.");
-      setState("success");
-      setMessage(`Berhasil: ${data.dailyRowsStored ?? data.savedRows ?? 0} agregat harian tersimpan.`);
-      onDone(reportType, data);
+
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? "Gagal memproses file.");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+
+        for (const chunk of lines) {
+          const dataLine = chunk.split("\n").find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+
+          const payload = JSON.parse(dataLine.slice(5).trim()) as {
+            progress?: number;
+            message?: string;
+            done?: boolean;
+            error?: string;
+            result?: Record<string, unknown>;
+          };
+
+          if (payload.error) throw new Error(payload.error);
+
+          if (payload.progress !== undefined) setProgress(payload.progress);
+          if (payload.message) setProgressMsg(payload.message);
+
+          if (payload.done && payload.result) {
+            const data = payload.result;
+            setState("success");
+            setProgress(100);
+            setMessage(
+              `Berhasil: ${(data.dailyRowsStored as number) ?? (data.savedRows as number) ?? 0} agregat tersimpan.`
+            );
+            onDone(reportType, data);
+          }
+        }
+      }
     } catch (err) {
       setState("error");
+      setProgress(0);
       setMessage((err as Error).message);
     }
   }
@@ -92,6 +138,41 @@ function UploadZone({ id, title, subtitle, hint, reportType, onDone }: UploadZon
         )}
       </div>
 
+      {/* Progress Bar */}
+      {state === "loading" && (
+        <div style={{ width: "100%", marginTop: 8 }}>
+          <div
+            style={{
+              width: "100%",
+              height: 8,
+              background: "var(--navy-100, #e8eaf0)",
+              borderRadius: 99,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${progress}%`,
+                height: "100%",
+                background: "linear-gradient(90deg, var(--navy) 0%, #4f8ef7 100%)",
+                borderRadius: 99,
+                transition: "width 0.4s ease",
+              }}
+            />
+          </div>
+          <p
+            style={{
+              fontSize: "0.75rem",
+              color: "var(--text-secondary, #6b7280)",
+              marginTop: 4,
+              textAlign: "center",
+            }}
+          >
+            {progress}% — {progressMsg}
+          </p>
+        </div>
+      )}
+
       {message && (
         <p
           style={{
@@ -121,12 +202,15 @@ function UploadZone({ id, title, subtitle, hint, reportType, onDone }: UploadZon
   );
 }
 
+
 export default function HomePage() {
   const router = useRouter();
   const [uploaded, setUploaded] = useState<Set<string>>(new Set());
+  const [refreshHistory, setRefreshHistory] = useState(0);
 
   function handleDone(type: string) {
     setUploaded((prev) => new Set([...prev, type]));
+    setRefreshHistory((prev) => prev + 1);
   }
 
   return (
@@ -187,7 +271,7 @@ export default function HomePage() {
 
         {/* Riwayat Upload */}
         <div className="mt-6">
-          <UploadHistorySection />
+          <UploadHistorySection refreshTrigger={refreshHistory} />
         </div>
       </main>
     </>
@@ -197,7 +281,7 @@ export default function HomePage() {
 // ────────────────────────────────────────────────────────
 // Upload History
 // ────────────────────────────────────────────────────────
-function UploadHistorySection() {
+function UploadHistorySection({ refreshTrigger }: { refreshTrigger: number }) {
   const [logs, setLogs] = useState<
     {
       id: number;
@@ -210,8 +294,11 @@ function UploadHistorySection() {
       uploadedBy?: string;
     }[]
   >([]);
-  const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    load();
+  }, [refreshTrigger]);
 
   async function load() {
     setLoading(true);
@@ -220,16 +307,7 @@ function UploadHistorySection() {
       if (res.ok) setLogs(await res.json());
     } finally {
       setLoading(false);
-      setLoaded(true);
     }
-  }
-
-  if (!loaded) {
-    return (
-      <button onClick={load} className="btn btn-secondary btn-sm" id="load-upload-history" disabled={loading}>
-        {loading ? "Memuat…" : "Lihat Riwayat Upload"}
-      </button>
-    );
   }
 
   return (

@@ -35,8 +35,7 @@ export const config = {
      * - /login (halaman autentikasi)
      * - /api/auth/** (endpoint NextAuth)
      * - /_next/** (aset Next.js)
-     * - /favicon.ico, /public/**
      */
-    "/((?!login|api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!login|api/auth|api/analyze|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
