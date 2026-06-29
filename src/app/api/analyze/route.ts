@@ -14,7 +14,6 @@ import { prisma } from "@/lib/db";
  * POST /api/analyze
  * form-data: file=<.xlsx>, type="report1" | "report2"
  * Mengembalikan Server-Sent Events stream dengan progress nyata.
- * Event: { progress: number (0-100), message?: string, done?: true, error?: string, result?: object }
  */
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -113,7 +112,6 @@ export async function POST(req: NextRequest) {
               },
             });
 
-            // Kirim progress setiap 5 record atau record terakhir
             if (i % 5 === 0 || i === total - 1) {
               const pct = Math.round(20 + ((i + 1) / total) * 75);
               send({ progress: pct, message: `Menyimpan record ${i + 1} / ${total}…` });
@@ -161,28 +159,50 @@ export async function POST(req: NextRequest) {
               },
             },
             update: {
-              patientCount: d.patientCount,
-              dcpNumerator: d.dcpNumerator,
-              dcpDenominator: d.dcpDenominator,
+              patientCount:    d.patientCount,
+              dcpNumerator:    d.dcpNumerator,
+              dcpDenominator:  d.dcpDenominator,
               cwtTotalSeconds: d.cwtTotalSeconds,
-              cwtCount: d.cwtCount,
-              appointment: d.appointment,
-              walkIn: d.walkIn,
-              bpjs: d.bpjs,
-              regular: d.regular,
+              cwtCount:        d.cwtCount,
+              appointment:     d.appointment,
+              walkIn:          d.walkIn,
+              bpjs:            d.bpjs,
+              regular:         d.regular,
+              maleCount:       d.maleCount,
+              femaleCount:     d.femaleCount,
+              age0_9:          d.age0_9,
+              age10_19:        d.age10_19,
+              age20_29:        d.age20_29,
+              age30_39:        d.age30_39,
+              age40_49:        d.age40_49,
+              age50_59:        d.age50_59,
+              age60_69:        d.age60_69,
+              age70_79:        d.age70_79,
+              age80plus:       d.age80plus,
             },
             create: {
-              serviceDate: new Date(d.serviceDate),
-              doctorName: d.doctorName,
-              patientCount: d.patientCount,
-              dcpNumerator: d.dcpNumerator,
-              dcpDenominator: d.dcpDenominator,
+              serviceDate:     new Date(d.serviceDate),
+              doctorName:      d.doctorName,
+              patientCount:    d.patientCount,
+              dcpNumerator:    d.dcpNumerator,
+              dcpDenominator:  d.dcpDenominator,
               cwtTotalSeconds: d.cwtTotalSeconds,
-              cwtCount: d.cwtCount,
-              appointment: d.appointment,
-              walkIn: d.walkIn,
-              bpjs: d.bpjs,
-              regular: d.regular,
+              cwtCount:        d.cwtCount,
+              appointment:     d.appointment,
+              walkIn:          d.walkIn,
+              bpjs:            d.bpjs,
+              regular:         d.regular,
+              maleCount:       d.maleCount,
+              femaleCount:     d.femaleCount,
+              age0_9:          d.age0_9,
+              age10_19:        d.age10_19,
+              age20_29:        d.age20_29,
+              age30_39:        d.age30_39,
+              age40_49:        d.age40_49,
+              age50_59:        d.age50_59,
+              age60_69:        d.age60_69,
+              age70_79:        d.age70_79,
+              age80plus:       d.age80plus,
             },
           });
 
@@ -195,11 +215,11 @@ export async function POST(req: NextRequest) {
         const dates = daily.map((d) => d.serviceDate).sort();
         await prisma.uploadLog.create({
           data: {
-            fileName: file.name,
+            fileName:   file.name,
             reportType: "report1",
-            rangeFrom: new Date(dates[0] ?? new Date()),
-            rangeTo: new Date(dates[dates.length - 1] ?? new Date()),
-            rowCount: rows.length,
+            rangeFrom:  new Date(dates[0] ?? new Date()),
+            rangeTo:    new Date(dates[dates.length - 1] ?? new Date()),
+            rowCount:   rows.length,
             uploadedBy: session.user.username,
           },
         });

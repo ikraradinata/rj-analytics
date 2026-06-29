@@ -1,11 +1,10 @@
 /**
  * analysis.ts — SEMUA rumus analisa Rawat Jalan.
  * Fungsi murni (tanpa efek samping) agar mudah diuji.
- * Nilai acuan validasi ada di analysis.test.ts.
  *
  * PENTING: jangan campur logika DCP dan CWT.
  *   DCP  -> Patient Time Punctuality ∈ {on time, early}, Is Waiting List = false
- *   CWT  -> Patient Time Punctuality = on time SAJA, jenis = appointment
+ *   CWT  -> Check In ∈ [Appointment From Time − 15 mnt, Appointment To Time], jenis = appointment
  */
 
 export type Row = Record<string, unknown>;
@@ -25,6 +24,62 @@ export function timeToSeconds(v: unknown): number | null {
   return h * 3600 + mi * 60 + se;
 }
 
+/**
+ * Parse nilai waktu dari Excel menjadi detik dari tengah malam.
+ * Mendukung tiga format:
+ *   1. String "hh:mm:ss"          → "08:15:00"
+ *   2. String datetime "... hh:mm:ss" → "01/06/2026 08:15:00"
+ *   3. Excel serial (number desimal) → 0.34375 = 08:15:00
+ */
+export function parseTimeOfDay(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+
+  // Angka desimal Excel (fraction of day)
+  if (typeof v === "number") {
+    const fraction = v % 1; // ambil bagian desimal
+    const secs = Math.round(fraction * 86400);
+    return secs >= 0 ? secs : null;
+  }
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  // Cari pola hh:mm:ss (menangani string "08:15:00" maupun "01/06/2026 08:15:00")
+  const m = s.match(/(\d{1,2}):(\d{2}):(\d{2})(?:\s|$)/);
+  if (m) {
+    const [h, mi, se] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    if (h < 0 || h > 23 || mi < 0 || mi > 59 || se < 0 || se > 59) return null;
+    return h * 3600 + mi * 60 + se;
+  }
+
+  // hh:mm tanpa detik
+  const m2 = s.match(/(\d{1,2}):(\d{2})(?:\s|$)/);
+  if (m2) {
+    const [h, mi] = [Number(m2[1]), Number(m2[2])];
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+    return h * 3600 + mi * 60;
+  }
+
+  return null;
+}
+
+/**
+ * Cek apakah checkIn berada dalam window CWT:
+ *   [Appointment From Time − 15 menit, Appointment To Time]
+ */
+export function isWithinCwtWindow(
+  checkIn: unknown,
+  appFrom: unknown,
+  appTo: unknown
+): boolean {
+  const ci = parseTimeOfDay(checkIn);
+  const af = parseTimeOfDay(appFrom);
+  const at = parseTimeOfDay(appTo);
+  if (ci === null || af === null || at === null) return false;
+  const windowStart = af - 15 * 60; // 15 menit = 900 detik
+  return ci >= windowStart && ci <= at;
+}
+
 const isFalse = (v: unknown): boolean => {
   if (typeof v === "boolean") return v === false;
   return norm(v) === "false";
@@ -32,8 +87,6 @@ const isFalse = (v: unknown): boolean => {
 
 const isOnTimeOrEarly = (v: unknown): boolean =>
   ["on time", "early"].includes(norm(v));
-
-const isOnTime = (v: unknown): boolean => norm(v) === "on time";
 
 const isAppointment = (v: unknown): boolean => norm(v) === "appointment";
 
@@ -48,23 +101,42 @@ export function ageAt(birth: unknown, ref: Date): number | null {
 }
 
 const AGE_BANDS = [
-  { label: "<10", lo: -Infinity, hi: 10 },
-  { label: "10-20", lo: 10, hi: 20 },
-  { label: "20-30", lo: 20, hi: 30 },
-  { label: "30-40", lo: 30, hi: 40 },
-  { label: "40-50", lo: 40, hi: 50 },
-  { label: "50-60", lo: 50, hi: 60 },
-  { label: "60-70", lo: 60, hi: 70 },
-  { label: "70-80", lo: 70, hi: 80 },
-  { label: ">80", lo: 80, hi: Infinity },
+  { label: "<10",   key: "age0_9",   lo: -Infinity, hi: 10 },
+  { label: "10-20", key: "age10_19", lo: 10, hi: 20 },
+  { label: "20-30", key: "age20_29", lo: 20, hi: 30 },
+  { label: "30-40", key: "age30_39", lo: 30, hi: 40 },
+  { label: "40-50", key: "age40_49", lo: 40, hi: 50 },
+  { label: "50-60", key: "age50_59", lo: 50, hi: 60 },
+  { label: "60-70", key: "age60_69", lo: 60, hi: 70 },
+  { label: "70-80", key: "age70_79", lo: 70, hi: 80 },
+  { label: ">80",   key: "age80plus", lo: 80, hi: Infinity },
 ] as const;
 
-function bandOf(age: number): string {
-  for (const b of AGE_BANDS) if (age >= b.lo && age < b.hi) return b.label;
-  return ">80";
+export type AgeBandKey = typeof AGE_BANDS[number]["key"];
+export type AgeBandLabel = typeof AGE_BANDS[number]["label"];
+
+export const AGE_BAND_KEYS = AGE_BANDS.map((b) => b.key);
+export const AGE_BAND_LABELS = AGE_BANDS.map((b) => b.label);
+
+function bandKeyOf(age: number): AgeBandKey {
+  for (const b of AGE_BANDS) if (age >= b.lo && age < b.hi) return b.key;
+  return "age80plus";
 }
 
-/* ---------- DCP & CWT ---------- */
+function bandLabelOf(key: AgeBandKey): AgeBandLabel {
+  return AGE_BANDS.find((b) => b.key === key)!.label;
+}
+
+/** Deteksi nama kolom gender (toleran terhadap variasi nama) */
+function detectGenderCol(row: Row): string | null {
+  const candidates = ["Gender", "Jenis Kelamin", "Sex", "Kelamin", "gender", "jenis kelamin"];
+  return candidates.find((c) => c in row) ?? null;
+}
+
+const isMale = (v: unknown): boolean =>
+  ["male", "laki-laki", "laki", "l", "m", "pria"].includes(norm(v));
+
+/* ---------- DCP & CWT (dari raw rows) ---------- */
 
 /** DCP global (%) dari sekumpulan baris. */
 export function computeDcp(rows: Row[]): { numerator: number; denominator: number; pct: number } {
@@ -74,12 +146,16 @@ export function computeDcp(rows: Row[]): { numerator: number; denominator: numbe
   return { numerator: num.length, denominator: denom.length, pct: round1(pct) };
 }
 
-/** CWT global (menit) dari sekumpulan baris. */
+/** CWT global (menit) dari sekumpulan baris — filter baru: window check-in. */
 export function computeCwt(rows: Row[]): { n: number; minutes: number } {
   const subset = rows.filter(
     (r) =>
-      isOnTime(r["Patient Time Punctuality"]) &&
-      isAppointment(r["Appointment VS Walk In"])
+      isAppointment(r["Appointment VS Walk In"]) &&
+      isWithinCwtWindow(
+        r["Check In Time"],
+        r["Appointment From Time"],
+        r["Appointment To Time"]
+      )
   );
   const secs = subset
     .map((r) => timeToSeconds(r["Waiting Time"]))
@@ -105,8 +181,9 @@ export interface Report1Result {
   cwtGlobalMinutes: number;
   perDoctor: DoctorMetric[];
   byPayer: Record<string, number>;
-  byAgeBand: Record<string, number>;
+  byAgeBand: Record<AgeBandLabel, number>;
   byDate: Record<string, number>;
+  byGender: { male: number; female: number; unknown: number };
 }
 
 /** Analisa lengkap Report 1. `refDate` = tanggal akhir periode (untuk umur). */
@@ -137,11 +214,24 @@ export function computeReport1(rows: Row[], refDate = new Date()): Report1Result
   }
 
   // umur
-  const byAgeBand: Record<string, number> = {};
-  for (const b of AGE_BANDS) byAgeBand[b.label] = 0;
+  const byAgeBand = Object.fromEntries(AGE_BANDS.map((b) => [b.label, 0])) as Record<AgeBandLabel, number>;
   for (const r of rows) {
     const age = ageAt(r["Birth Date"], refDate);
-    if (age !== null) byAgeBand[bandOf(age)]++;
+    if (age !== null) {
+      const label = bandLabelOf(bandKeyOf(age));
+      byAgeBand[label]++;
+    }
+  }
+
+  // gender
+  const byGender = { male: 0, female: 0, unknown: 0 };
+  const gCol = detectGenderCol(rows[0] ?? {});
+  if (gCol) {
+    for (const r of rows) {
+      if (isMale(r[gCol])) byGender.male++;
+      else if (norm(r[gCol]) === "") byGender.unknown++;
+      else byGender.female++;
+    }
   }
 
   // tanggal pelayanan
@@ -159,6 +249,7 @@ export function computeReport1(rows: Row[], refDate = new Date()): Report1Result
     byPayer,
     byAgeBand,
     byDate: Object.fromEntries(Object.entries(byDate).sort()),
+    byGender,
   };
 }
 
@@ -203,7 +294,7 @@ export function computeReport2(rows: Row[]): Report2Result {
   };
 }
 
-/* ---------- ambang warna KPI (sesuai keputusan user) ---------- */
+/* ---------- ambang warna KPI ---------- */
 // DCP >= 70% -> hijau, < 70% -> merah.  CWT < 30 mnt -> hijau, >= 30 mnt -> merah.
 export const DCP_THRESHOLD = 70;
 export const CWT_THRESHOLD = 30;
@@ -212,8 +303,7 @@ export const cwtStatus = (min: number): "good" | "bad" => (min < CWT_THRESHOLD ?
 
 /* ===================================================================
  * AGREGAT HARIAN (untuk DB) — menyimpan KOMPONEN MENTAH, bukan persen.
- * Grain = (tanggal × dokter). Range tanggal apa pun dijumlahkan dari sini,
- * sehingga DCP/CWT tetap akurat untuk periode parsial (mis. 1 Mei–15 Jun).
+ * Grain = (tanggal × dokter). Range tanggal apa pun dijumlahkan dari sini.
  * =================================================================== */
 
 /** "dd/mm/yyyy" -> "yyyy-mm-dd". */
@@ -224,45 +314,94 @@ export function parseServiceDate(v: unknown): string {
 }
 
 export interface DailyDoctorAgg {
-  serviceDate: string;     // yyyy-mm-dd
+  serviceDate: string;      // yyyy-mm-dd
   doctorName: string;
   patientCount: number;
-  dcpNumerator: number;    // On Time/Early ∧ bukan waiting list
-  dcpDenominator: number;  // bukan waiting list
-  cwtTotalSeconds: number; // Σ waktu tunggu (On Time ∧ Appointment)
-  cwtCount: number;        // jumlah baris valid untuk CWT
+  dcpNumerator: number;     // On Time/Early ∧ bukan waiting list
+  dcpDenominator: number;   // bukan waiting list
+  cwtTotalSeconds: number;  // Σ Waiting Time (Check In dalam window ∧ Appointment)
+  cwtCount: number;         // jumlah baris valid untuk CWT
   appointment: number;
   walkIn: number;
   bpjs: number;
   regular: number;
+  // gender
+  maleCount: number;
+  femaleCount: number;
+  // age bands
+  age0_9: number;
+  age10_19: number;
+  age20_29: number;
+  age30_39: number;
+  age40_49: number;
+  age50_59: number;
+  age60_69: number;
+  age70_79: number;
+  age80plus: number;
 }
 
 /** Pecah Report 1 jadi agregat per (tanggal × dokter) untuk disimpan ke DB. */
 export function aggregateReport1ByDate(rows: Row[]): DailyDoctorAgg[] {
   const map = new Map<string, DailyDoctorAgg>();
+  const gCol = detectGenderCol(rows[0] ?? {});
+
   for (const r of rows) {
     const serviceDate = parseServiceDate(r["Appointment Date"]);
     const doctorName = String(r["Doctor Name"] ?? "(tanpa nama)").trim();
     const key = serviceDate + "||" + doctorName;
     let a = map.get(key);
     if (!a) {
-      a = { serviceDate, doctorName, patientCount: 0, dcpNumerator: 0, dcpDenominator: 0,
-            cwtTotalSeconds: 0, cwtCount: 0, appointment: 0, walkIn: 0, bpjs: 0, regular: 0 };
+      a = {
+        serviceDate, doctorName,
+        patientCount: 0,
+        dcpNumerator: 0, dcpDenominator: 0,
+        cwtTotalSeconds: 0, cwtCount: 0,
+        appointment: 0, walkIn: 0, bpjs: 0, regular: 0,
+        maleCount: 0, femaleCount: 0,
+        age0_9: 0, age10_19: 0, age20_29: 0, age30_39: 0, age40_49: 0,
+        age50_59: 0, age60_69: 0, age70_79: 0, age80plus: 0,
+      };
       map.set(key, a);
     }
+
     a.patientCount++;
+
+    // DCP
     if (isFalse(r["Is Waiting List"])) {
       a.dcpDenominator++;
       if (isOnTimeOrEarly(r["Patient Time Punctuality"])) a.dcpNumerator++;
     }
-    if (isOnTime(r["Patient Time Punctuality"]) && isAppointment(r["Appointment VS Walk In"])) {
+
+    // CWT — filter baru: window check-in
+    if (
+      isAppointment(r["Appointment VS Walk In"]) &&
+      isWithinCwtWindow(r["Check In Time"], r["Appointment From Time"], r["Appointment To Time"])
+    ) {
       const s = timeToSeconds(r["Waiting Time"]);
       if (s !== null) { a.cwtTotalSeconds += s; a.cwtCount++; }
     }
+
+    // Appointment vs Walk-in
     if (isAppointment(r["Appointment VS Walk In"])) a.appointment++; else a.walkIn++;
+
+    // Payer
     const p = norm(r["Payer"]);
     if (p === "bpjs") a.bpjs++; else if (p === "regular") a.regular++;
+
+    // Gender
+    if (gCol) {
+      if (isMale(r[gCol])) a.maleCount++;
+      else if (norm(r[gCol]) !== "") a.femaleCount++;
+    }
+
+    // Age band
+    const refDate = new Date(serviceDate);
+    const age = ageAt(r["Birth Date"], isNaN(refDate.getTime()) ? new Date() : refDate);
+    if (age !== null) {
+      a[bandKeyOf(age)]++;
+    }
   }
+
   return [...map.values()].sort(
     (x, y) => x.serviceDate.localeCompare(y.serviceDate) || x.doctorName.localeCompare(y.doctorName)
   );
@@ -276,25 +415,56 @@ export interface CombinedMetric {
   dcpDenominator: number;
   cwtTotalSeconds: number;
   cwtCount: number;
+  maleCount: number;
+  femaleCount: number;
+  age0_9: number;
+  age10_19: number;
+  age20_29: number;
+  age30_39: number;
+  age40_49: number;
+  age50_59: number;
+  age60_69: number;
+  age70_79: number;
+  age80plus: number;
 }
 
 /** Gabungkan beberapa agregat harian (hasil query DB by range) -> KPI akurat. */
 export function combineMetrics(items: Pick<DailyDoctorAgg,
-  "patientCount" | "dcpNumerator" | "dcpDenominator" | "cwtTotalSeconds" | "cwtCount">[]
-): CombinedMetric {
+  "patientCount" | "dcpNumerator" | "dcpDenominator" | "cwtTotalSeconds" | "cwtCount" |
+  "maleCount" | "femaleCount" |
+  "age0_9" | "age10_19" | "age20_29" | "age30_39" | "age40_49" |
+  "age50_59" | "age60_69" | "age70_79" | "age80plus"
+>[]): CombinedMetric {
   const s = items.reduce(
     (a, b) => ({
-      patientCount: a.patientCount + b.patientCount,
-      dcpNumerator: a.dcpNumerator + b.dcpNumerator,
-      dcpDenominator: a.dcpDenominator + b.dcpDenominator,
-      cwtTotalSeconds: a.cwtTotalSeconds + b.cwtTotalSeconds,
-      cwtCount: a.cwtCount + b.cwtCount,
+      patientCount:     a.patientCount     + b.patientCount,
+      dcpNumerator:     a.dcpNumerator     + b.dcpNumerator,
+      dcpDenominator:   a.dcpDenominator   + b.dcpDenominator,
+      cwtTotalSeconds:  a.cwtTotalSeconds  + b.cwtTotalSeconds,
+      cwtCount:         a.cwtCount         + b.cwtCount,
+      maleCount:        a.maleCount        + b.maleCount,
+      femaleCount:      a.femaleCount      + b.femaleCount,
+      age0_9:    a.age0_9    + b.age0_9,
+      age10_19:  a.age10_19  + b.age10_19,
+      age20_29:  a.age20_29  + b.age20_29,
+      age30_39:  a.age30_39  + b.age30_39,
+      age40_49:  a.age40_49  + b.age40_49,
+      age50_59:  a.age50_59  + b.age50_59,
+      age60_69:  a.age60_69  + b.age60_69,
+      age70_79:  a.age70_79  + b.age70_79,
+      age80plus: a.age80plus + b.age80plus,
     }),
-    { patientCount: 0, dcpNumerator: 0, dcpDenominator: 0, cwtTotalSeconds: 0, cwtCount: 0 }
+    {
+      patientCount: 0, dcpNumerator: 0, dcpDenominator: 0,
+      cwtTotalSeconds: 0, cwtCount: 0,
+      maleCount: 0, femaleCount: 0,
+      age0_9: 0, age10_19: 0, age20_29: 0, age30_39: 0, age40_49: 0,
+      age50_59: 0, age60_69: 0, age70_79: 0, age80plus: 0,
+    }
   );
   return {
     ...s,
-    dcpPct: s.dcpDenominator ? round1((s.dcpNumerator / s.dcpDenominator) * 100) : 0,
-    cwtMinutes: s.cwtCount ? round1(s.cwtTotalSeconds / s.cwtCount / 60) : 0,
+    dcpPct:     s.dcpDenominator ? round1((s.dcpNumerator / s.dcpDenominator) * 100) : 0,
+    cwtMinutes: s.cwtCount       ? round1(s.cwtTotalSeconds / s.cwtCount / 60) : 0,
   };
 }

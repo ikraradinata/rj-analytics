@@ -29,15 +29,30 @@ model DoctorDailyMetric {
   dcpNumerator    Int                    // On Time/Early ∧ bukan waiting list
   dcpDenominator  Int                    // bukan waiting list
 
-  // Komponen CWT mentah
-  cwtTotalSeconds Int                    // Σ waktu tunggu (On Time ∧ Appointment)
+  // Komponen CWT mentah (filter baru: Check In dalam window ±15 mnt dari Appointment)
+  cwtTotalSeconds Int                    // Σ Waiting Time valid
   cwtCount        Int                    // jumlah baris valid
 
-  // Pemecah volume
+  // Pemecah volume — jenis kunjungan & payer
   appointment     Int      @default(0)
   walkIn          Int      @default(0)
   bpjs            Int      @default(0)
   regular         Int      @default(0)
+
+  // Gender
+  maleCount       Int      @default(0)
+  femaleCount     Int      @default(0)
+
+  // Kelompok Usia
+  age0_9          Int      @default(0)
+  age10_19        Int      @default(0)
+  age20_29        Int      @default(0)
+  age30_39        Int      @default(0)
+  age40_49        Int      @default(0)
+  age50_59        Int      @default(0)
+  age60_69        Int      @default(0)
+  age70_79        Int      @default(0)
+  age80plus       Int      @default(0)
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -46,6 +61,7 @@ model DoctorDailyMetric {
   @@index([doctorName])
   @@index([serviceDate])
 }
+
 
 // Analisa pasien (New vs Existing) per (tanggal × dokter) — dari Report 2.
 model PatientMixDaily {
