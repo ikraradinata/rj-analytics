@@ -64,6 +64,30 @@ export function parseTimeOfDay(v: unknown): number | null {
 }
 
 /**
+ * Tentukan status Punctuality berdasarkan definisi baru:
+ * - Early: Check In < (AppFrom - 15 menit)
+ * - On Time: (AppFrom - 15 menit) <= Check In <= AppTo
+ * - Late: Check In > AppTo
+ */
+export function getPunctualityStatus(
+  checkIn: unknown,
+  appFrom: unknown,
+  appTo: unknown
+): "early" | "on_time" | "late" | null {
+  const ci = parseTimeOfDay(checkIn);
+  const af = parseTimeOfDay(appFrom);
+  const at = parseTimeOfDay(appTo);
+  
+  if (ci === null || af === null || at === null) return null;
+  
+  const earlyBoundary = af - 15 * 60; // 15 menit sebelum AppFrom
+  
+  if (ci < earlyBoundary) return "early";
+  if (ci >= earlyBoundary && ci <= at) return "on_time";
+  return "late";
+}
+
+/**
  * Cek apakah checkIn berada dalam window CWT:
  *   [Appointment From Time − 15 menit, Appointment To Time]
  */
@@ -72,21 +96,18 @@ export function isWithinCwtWindow(
   appFrom: unknown,
   appTo: unknown
 ): boolean {
-  const ci = parseTimeOfDay(checkIn);
-  const af = parseTimeOfDay(appFrom);
-  const at = parseTimeOfDay(appTo);
-  if (ci === null || af === null || at === null) return false;
-  const windowStart = af - 15 * 60; // 15 menit = 900 detik
-  return ci >= windowStart && ci <= at;
+  return getPunctualityStatus(checkIn, appFrom, appTo) === "on_time";
+}
+
+export function isDcpValid(r: Row): boolean {
+  const status = getPunctualityStatus(r["Check In Time"], r["Appointment From Time"], r["Appointment To Time"]);
+  return status === "early" || status === "on_time";
 }
 
 const isFalse = (v: unknown): boolean => {
   if (typeof v === "boolean") return v === false;
   return norm(v) === "false";
 };
-
-const isOnTimeOrEarly = (v: unknown): boolean =>
-  ["on time", "early"].includes(norm(v));
 
 const isAppointment = (v: unknown): boolean => norm(v) === "appointment";
 
@@ -141,7 +162,7 @@ const isMale = (v: unknown): boolean =>
 /** DCP global (%) dari sekumpulan baris. */
 export function computeDcp(rows: Row[]): { numerator: number; denominator: number; pct: number } {
   const denom = rows.filter((r) => isFalse(r["Is Waiting List"]));
-  const num = denom.filter((r) => isOnTimeOrEarly(r["Patient Time Punctuality"]));
+  const num = denom.filter(isDcpValid);
   const pct = denom.length ? (num.length / denom.length) * 100 : 0;
   return { numerator: num.length, denominator: denom.length, pct: round1(pct) };
 }
@@ -369,7 +390,7 @@ export function aggregateReport1ByDate(rows: Row[]): DailyDoctorAgg[] {
     // DCP
     if (isFalse(r["Is Waiting List"])) {
       a.dcpDenominator++;
-      if (isOnTimeOrEarly(r["Patient Time Punctuality"])) a.dcpNumerator++;
+      if (isDcpValid(r)) a.dcpNumerator++;
     }
 
     // CWT — filter baru: window check-in
