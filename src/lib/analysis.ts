@@ -108,7 +108,8 @@ export function isWithinCwtWindow(
 }
 
 export function isDcpValid(r: Row): boolean {
-  const status = getPunctualityStatus(r["Check In Time"], r["Appointment From Time"], r["Appointment To Time"]);
+  const checkIn = r["Check In Time"] ?? r["Check-in"];
+  const status = getPunctualityStatus(checkIn, r["Appointment From Time"], r["Appointment To Time"]);
   return status === "early" || status === "on_time";
 }
 
@@ -181,7 +182,7 @@ export function computeCwt(rows: Row[]): { n: number; minutes: number } {
     (r) =>
       isAppointment(r["Appointment VS Walk In"]) &&
       isWithinCwtWindow(
-        r["Check In Time"],
+        r["Check In Time"] ?? r["Check-in"],
         r["Appointment From Time"],
         r["Appointment To Time"]
       )
@@ -404,7 +405,7 @@ export function aggregateReport1ByDate(rows: Row[]): DailyDoctorAgg[] {
     // CWT — filter baru: window check-in
     if (
       isAppointment(r["Appointment VS Walk In"]) &&
-      isWithinCwtWindow(r["Check In Time"], r["Appointment From Time"], r["Appointment To Time"])
+      isWithinCwtWindow(r["Check In Time"] ?? r["Check-in"], r["Appointment From Time"], r["Appointment To Time"])
     ) {
       const s = timeToSeconds(r["Waiting Time"]);
       if (s !== null) { a.cwtTotalSeconds += s; a.cwtCount++; }
