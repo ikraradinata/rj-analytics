@@ -13,9 +13,17 @@ export type Row = Record<string, unknown>;
 
 const norm = (v: unknown): string => String(v ?? "").trim().toLowerCase();
 
-/** "hh:mm:ss" -> detik. Mengembalikan null untuk nilai kosong/rusak/negatif. */
+/** "hh:mm:ss" atau angka desimal Excel -> detik. Mengembalikan null untuk nilai kosong/rusak/negatif. */
 export function timeToSeconds(v: unknown): number | null {
-  const s = String(v ?? "").trim();
+  if (v === null || v === undefined || v === "") return null;
+
+  if (typeof v === "number") {
+    const fraction = Math.abs(v); // treat negative duration gracefully if possible, or just v
+    const secs = Math.round(fraction * 86400);
+    return secs;
+  }
+
+  const s = String(v).trim();
   if (!s || s.toLowerCase() === "undefined") return null;
   const m = s.match(/^(-?\d+):(-?\d+):(-?\d+)$/);
   if (!m) return null;
