@@ -159,6 +159,19 @@ export async function GET(req: NextRequest) {
     }))
     .sort((a, b) => b.total - a.total);
 
+  // ── Pasien per Dokter per Bulan (MoM) ───────────────────────────────────
+  const momMap = new Map<string, Record<string, number>>();
+  for (const m of metrics) {
+    const month = m.serviceDate.toISOString().slice(0, 7); // "YYYY-MM"
+    const docObj = momMap.get(m.doctorName) || {};
+    docObj[month] = (docObj[month] || 0) + m.patientCount;
+    momMap.set(m.doctorName, docObj);
+  }
+  const perDoctorPerMonth = [...momMap.entries()].map(([doctorName, months]) => ({
+    doctorName,
+    ...months
+  }));
+
   return NextResponse.json({
     hasData: true,
     period:  { from, to },
@@ -185,5 +198,6 @@ export async function GET(req: NextRequest) {
       existingTotal,
       perDoctor: patientMixPerDoctor,
     },
+    perDoctorPerMonth,
   });
 }

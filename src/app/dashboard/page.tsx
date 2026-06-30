@@ -9,11 +9,11 @@ import {
   CwtTrendChart,
   PayerChart,
   AgeBandChart,
-  GenderPieChart,
   PatientMixPieChart,
   PatientMixBarChart,
   DcpBarChart,
 } from "@/components/Charts";
+import DoctorMonthTable from "@/components/DoctorMonthTable";
 import * as XLSX from "xlsx";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -60,6 +60,7 @@ interface MetricsData {
     existingTotal: number;
     perDoctor:     { doctorName: string; newPatient: number; existingPatient: number; total: number }[];
   };
+  perDoctorPerMonth?: { doctorName: string; [month: string]: string | number }[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -184,13 +185,6 @@ export default function DashboardPage() {
     };
   });
 
-  // byGender — optionally filter only selected
-  const genderData = (() => {
-    const raw = data?.byGender ?? { male: 0, female: 0 };
-    if (!gender) return raw;
-    return { male: gender === "male" ? raw.male : 0, female: gender === "female" ? raw.female : 0 };
-  })();
-
   // byPayer — optionally filter
   const payerData = (() => {
     const raw = data?.byPayer ?? {};
@@ -303,14 +297,7 @@ export default function DashboardPage() {
               {doctorList.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
-          <div className="filter-group">
-            <label className="filter-label" htmlFor="filter-gender">Jenis Kelamin</label>
-            <select id="filter-gender" value={gender} onChange={(e) => setGender(e.target.value)} className="filter-select">
-              <option value="">Semua</option>
-              <option value="male">Laki-laki</option>
-              <option value="female">Perempuan</option>
-            </select>
-          </div>
+
           <div className="filter-group">
             <label className="filter-label" htmlFor="filter-payer">Payer</label>
             <select id="filter-payer" value={payer} onChange={(e) => setPayer(e.target.value)} className="filter-select">
@@ -427,11 +414,8 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── Distribusi: Gender + Payer + Usia ── */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: "1rem", marginTop: "1rem" }}>
-              <ChartCard title="Jenis Kelamin" sub={gender ? (gender === "male" ? "Filter: Laki-laki" : "Filter: Perempuan") : "Semua pasien"}>
-                <GenderPieChart data={genderData} />
-              </ChartCard>
+            {/* ── Distribusi: Payer + Usia ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "1rem", marginTop: "1rem" }}>
               <ChartCard title="Distribusi Payer" sub={payer ? `Filter: ${payer.toUpperCase()}` : "Semua payer"}>
                 <PayerChart data={payerData} />
               </ChartCard>
@@ -453,6 +437,13 @@ export default function DashboardPage() {
                 <ChartCard title="New vs Existing per Dokter">
                   <PatientMixBarChart data={patientMix.perDoctor} />
                 </ChartCard>
+              </div>
+            )}
+
+            {/* ── Pasien per Dokter (Bulanan) ── */}
+            {data.perDoctorPerMonth && data.perDoctorPerMonth.length > 0 && (
+              <div style={{ marginTop: "1rem" }}>
+                <DoctorMonthTable data={data.perDoctorPerMonth} />
               </div>
             )}
 

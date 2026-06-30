@@ -177,33 +177,7 @@ export function PayerChart({ data }: { data: Record<string, number> }) {
   );
 }
 
-// ── Gender (pie) ─────────────────────────────────────────────────────────────
-export function GenderPieChart({ data }: { data: { male: number; female: number } }) {
-  const total = data.male + data.female;
-  if (total === 0) return <EmptyChart />;
 
-  const chartData = [
-    { name: "Laki-laki", value: data.male },
-    { name: "Perempuan", value: data.female },
-  ].filter((d) => d.value > 0);
-
-  const GENDER_COLORS = [SKY, ROSE];
-
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <PieChart>
-        <Pie data={chartData} dataKey="value" nameKey="name"
-          cx="50%" cy="50%" outerRadius={80}
-          label={({ name, percent }) => `${name ?? ""} ${((percent ?? 0) * 100).toFixed(0)}%`}
-          labelLine={false}>
-          {chartData.map((_, i) => <Cell key={i} fill={GENDER_COLORS[i % 2]} />)}
-        </Pie>
-        <Tooltip contentStyle={TT_STYLE} formatter={(v) => [(v as number).toLocaleString("id-ID"), "Pasien"]} />
-        <Legend />
-      </PieChart>
-    </ResponsiveContainer>
-  );
-}
 
 // ── Distribusi Umur (bar) ────────────────────────────────────────────────────
 export function AgeBandChart({ data }: { data: Record<string, number> }) {
@@ -273,7 +247,7 @@ export function PatientMixBarChart({ data }: {
         <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#64748b" }} angle={-35} textAnchor="end" interval={0} />
         <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
         <Tooltip contentStyle={TT_STYLE} />
-        <Legend />
+        <Legend verticalAlign="top" wrapperStyle={{ paddingBottom: 20 }} />
         <Bar dataKey="baru"  name="Pasien Baru"  fill={GREEN} radius={[4, 4, 0, 0]} stackId="a" />
         <Bar dataKey="lama"  name="Pasien Lama"  fill={AMBER} radius={[0, 0, 0, 0]} stackId="a" />
       </BarChart>
