@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { toPng } from "html-to-image";
 import Navbar from "@/components/Navbar";
 import PivotTable, { type PivotRow } from "@/components/PivotTable";
 import {
@@ -110,20 +111,49 @@ function KpiCard({
 
 // ── Chart Section wrapper ─────────────────────────────────────────────────────
 
-function ChartCard({ title, sub, children, span2 = false }: {
-  title:    string;
-  sub?:     string;
-  children: React.ReactNode;
-  span2?:   boolean;
+function ChartCard({ title, sub, children, span2 = false, exportable = true }: {
+  title:      string;
+  sub?:       string;
+  children:   React.ReactNode;
+  span2?:     boolean;
+  exportable?: boolean;
 }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  const exportToPng = useCallback(() => {
+    if (chartRef.current === null) return;
+    toPng(chartRef.current, { backgroundColor: "#ffffff" })
+      .then((dataUrl) => {
+        const link = document.createElement("a");
+        link.download = `${title.replace(/\s+/g, "_").toLowerCase()}.png`;
+        link.href = dataUrl;
+        link.click();
+      })
+      .catch((err) => {
+        console.error("Oops, something went wrong!", err);
+      });
+  }, [title]);
+
   return (
     <div className="card" style={span2 ? { gridColumn: "span 2" } : {}}>
       <div className="card-body">
-        <div className="section-header">
-          <span className="section-title">{title}</span>
-          {sub && <span className="text-xs text-muted">{sub}</span>}
+        <div className="section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <span className="section-title">{title}</span>
+            {sub && <span className="text-xs text-muted" style={{ display: "block", marginTop: 4 }}>{sub}</span>}
+          </div>
+          {exportable && (
+            <button onClick={exportToPng} className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }} title="Export as PNG">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} style={{ width: 14, height: 14 }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              PNG
+            </button>
+          )}
         </div>
-        <div className="chart-wrap mt-2">{children}</div>
+        <div className="chart-wrap mt-2" ref={chartRef} style={{ background: "#fff" }}>
+          {children}
+        </div>
       </div>
     </div>
   );
